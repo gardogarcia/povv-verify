@@ -69,3 +69,16 @@ their order). This exact function is shared by the POVV server signer and this
 verifier, so independently recomputed hashes always match byte-for-byte.
 
 MIT licensed.
+
+## Verified by POVV
+
+[![POVV Verified](https://povv.io/api/badge/be965c4656046de89ab52f20af8596788725c19ea8e2fc35046d4645857ab82c)](https://povv.io/v/be965c4656046de89ab52f20af8596788725c19ea8e2fc35046d4645857ab82c)
+
+This repository is audited by [POVV](https://povv.io)'s adversarial AI swarm. The sealed
+verdict — including its full disclosed evidence base and machine-verified receipts — is
+public at the badge link, and its Ed25519 signature can be checked offline with this very
+package:
+
+```bash
+npx povv-verify be965c4656046de89ab52f20af8596788725c19ea8e2fc35046d4645857ab82c
+```
