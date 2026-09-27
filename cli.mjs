@@ -4,8 +4,9 @@
 // Usage:
 //   povv-verify <receipt.json> [--jwks <url>] [--pubkey <public.pem>]
 //
-// If neither --jwks nor --pubkey is given, the JWKS URL embedded in the receipt
-// is used (set --no-fetch to forbid network access and require a local key).
+// If neither --jwks nor --pubkey is given, the key is fetched from POVV's published
+// key set (https://povv.io/.well-known/povv-ledger-keys). The JWKS URL embedded in
+// a receipt is never trusted. --no-fetch forbids network access (needs --pubkey).
 
 import { readFileSync } from "node:fs";
 import { verifyReceipt } from "./index.mjs";
@@ -38,13 +39,10 @@ async function main() {
     process.exit(2);
   }
 
-  const options = { fetchKey: args.fetch && !args.pubkey && !args.jwks };
+  const options = { fetchKey: args.fetch && !args.pubkey };
   if (args.pubkey) options.pem = readFileSync(args.pubkey, "utf8");
-  if (args.jwks) {
-    // Override the receipt's JWKS URL with an explicitly trusted one.
-    receipt = { ...receipt, signature: { ...receipt.signature, jwks_url: args.jwks } };
-    options.fetchKey = true;
-  }
+  // An explicitly pinned key set is trusted because YOU chose it, not the receipt.
+  if (args.jwks) options.jwksUrl = args.jwks;
 
   const result = await verifyReceipt(receipt, options);
 

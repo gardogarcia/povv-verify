@@ -33,17 +33,17 @@ node packages/povv-verify/cli.mjs <receipt.json>
 
 ```bash
 curl -H "Authorization: Bearer <token>" \
-  https://app.povv.io/api/ledger/receipt/<audit_run_id> > receipt.json
+  https://povv.io/api/ledger/receipt/<audit_run_id> > receipt.json
 ```
 
 ## Verify
 
 ```bash
-# Use the JWKS URL embedded in the receipt (default):
+# Check against POVV's published key set (default; the receipt's own jwks_url is ignored):
 povv-verify receipt.json
 
-# Pin a specific JWKS endpoint:
-povv-verify receipt.json --jwks https://app.povv.io/.well-known/povv-ledger-keys
+# Pin a key set you trust (for example a mirror you control):
+povv-verify receipt.json --jwks https://povv.io/.well-known/povv-ledger-keys
 
 # Fully offline with a local public key, no network:
 povv-verify receipt.json --pubkey povv-public.pem --no-fetch
@@ -61,6 +61,23 @@ const receipt = JSON.parse(readFileSync("receipt.json", "utf8"));
 const result = await verifyReceipt(receipt, { fetchKey: true });
 console.log(result.ok, result.checks);
 ```
+
+## Trust model and security fix (1.1.0)
+
+The key a receipt is checked against must come from someone other than the receipt's author.
+Since 1.1.0 the verifier fetches keys only from POVV's published key set
+(`https://povv.io/.well-known/povv-ledger-keys`) or from a key set / PEM **you** pin with
+`--jwks` / `--pubkey`. The `jwks_url` written inside a receipt is reported, never followed,
+and a `key_id` that is not in the trusted set fails verification instead of falling back
+to another key.
+
+Versions before 1.1.0 followed the receipt's own `jwks_url` by default, so a forger could
+sign a fabricated receipt with their own key, publish that key, and get `VERIFIED`.
+POVV's own Full Repo audit of this repository flagged the path (one confirmed finding on
+the key fallback, three coverage gaps on the receipt-directed fetch); reading the full
+source confirmed it, and `test.mjs` now reproduces the forgery and requires it to fail.
+
+Run the tests with `npm test` (Node ≥ 18, no dependencies, no network).
 
 ## Canonicalization
 
@@ -80,5 +97,6 @@ public at the badge link, and its Ed25519 signature can be checked offline with 
 package:
 
 ```bash
-npx povv-verify be965c4656046de89ab52f20af8596788725c19ea8e2fc35046d4645857ab82c
+curl -H "Authorization: Bearer <token>" https://povv.io/api/ledger/receipt/<audit_run_id> > receipt.json
+node cli.mjs receipt.json
 ```

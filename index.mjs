@@ -63,19 +63,34 @@ export function verifySignature(integrityHashHex, signatureB64, key) {
   return edVerify(null, Buffer.from(integrityHashHex, "hex"), publicKey, Buffer.from(signatureB64, "base64"));
 }
 
-/** Fetch the JWKS and return the JWK matching the receipt's key id (or the first). */
-export async function fetchJwk(jwksUrl, keyId) {
-  const res = await fetch(jwksUrl);
+/**
+ * The key set a receipt is checked against by default: POVV's published ledger
+ * keys. A receipt's own `signature.jwks_url` is NEVER trusted — whoever writes a
+ * receipt could point it at a key they control and sign a forgery with it.
+ */
+export const DEFAULT_JWKS_URL = "https://povv.io/.well-known/povv-ledger-keys";
+
+/**
+ * Fetch a TRUSTED JWKS and return the JWK whose `kid` equals `keyId`.
+ * Fails closed: a missing key id or a key id that is not in the set is an error,
+ * never a fallback to some other key.
+ */
+export async function fetchJwk(jwksUrl, keyId, fetchImpl = fetch) {
+  if (!keyId) throw new Error("Receipt names no signing key id (signature.key_id).");
+  const res = await fetchImpl(jwksUrl);
   if (!res.ok) throw new Error(`JWKS fetch failed: HTTP ${res.status}`);
   const body = await res.json();
   const keys = Array.isArray(body.keys) ? body.keys : [];
-  if (keys.length === 0) throw new Error("JWKS contains no keys.");
-  return keys.find((k) => k.kid === keyId) ?? keys[0];
+  const match = keys.find((k) => k && k.kid === keyId);
+  if (!match) throw new Error(`Key "${keyId}" is not in the trusted key set at ${jwksUrl}.`);
+  return match;
 }
 
 /**
  * Verify a full receipt. Pass either { jwk } / { pem } directly, or set
- * fetchKey:true to pull the key from receipt.signature.jwks_url.
+ * fetchKey:true to fetch the key named by receipt.signature.key_id from a TRUSTED
+ * key set: options.jwksUrl if you pin one, otherwise DEFAULT_JWKS_URL. The URL
+ * embedded in the receipt is reported, never followed.
  *
  * Returns { ok, checks: { hashValid, signatureValid, inclusionValid|null }, errors }.
  */
@@ -98,9 +113,14 @@ export async function verifyReceipt(receipt, options = {}) {
   let key = null;
   if (options.pem) key = { pem: options.pem };
   else if (options.jwk) key = { jwk: options.jwk };
-  else if (options.fetchKey && receipt.signature?.jwks_url) {
+  else if (options.fetchKey) {
+    const trustedUrl = options.jwksUrl || DEFAULT_JWKS_URL;
+    const claimedUrl = receipt.signature?.jwks_url;
+    if (claimedUrl && claimedUrl !== trustedUrl) {
+      errors.push(`Ignored the receipt's own jwks_url (${claimedUrl}); checked against ${trustedUrl}.`);
+    }
     try {
-      const jwk = await fetchJwk(receipt.signature.jwks_url, receipt.signature.key_id);
+      const jwk = await fetchJwk(trustedUrl, receipt.signature?.key_id, options.fetch || fetch);
       key = { jwk };
     } catch (e) {
       errors.push(`JWKS error: ${e.message}`);
