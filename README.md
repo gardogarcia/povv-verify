@@ -6,8 +6,9 @@ POVV seals every audit into an append-only, hash-linked, Ed25519-signed ledger. 
 ledger is designed to anchor Merkle roots to an external witness; that anchoring is not
 active yet, and this tool does not check a witness (see below). This tool lets anyone —
 an enterprise client, an auditor, a regulator — independently verify a sealed audit
-**without trusting POVV's servers**. You only need the receipt JSON and POVV's
-published public key.
+**without trusting POVV's servers**: pin POVV's published public key once (`--pubkey`)
+and verification needs no POVV server at all. Without a pinned key, the CLI fetches it
+from POVV's published key set, so that fetch is the one thing you trust POVV for.
 
 ## What it checks
 
@@ -21,8 +22,10 @@ published public key.
 3. **Merkle inclusion** — if the receipt carries an anchor, verifies the inclusion proof
    reproduces the Merkle root **written in that receipt**. The root is not compared with
    any external witness, so this is a consistency check, not proof of when the seal was
-   made. `ok` rests on the hash and the signature; a receipt without an anchor can still
-   be `ok` (`checks.inclusionValid` is `null`).
+   made. `ok` requires the hash, the signature and, when the signed payload names an
+   audit id, a matching receipt label (`checks.idBound`); a receipt without an anchor can
+   still be `ok` (`checks.inclusionValid` is `null`). `errors` also carries informational
+   notes, so gate on `ok`, not on `errors.length`.
 
 ## Install
 
@@ -133,12 +136,15 @@ MIT licensed.
 
 ## Verified by POVV
 
-[![POVV Verified](https://povv.io/api/badge/be965c4656046de89ab52f20af8596788725c19ea8e2fc35046d4645857ab82c)](https://povv.io/v/be965c4656046de89ab52f20af8596788725c19ea8e2fc35046d4645857ab82c)
+[![POVV Verified](https://povv.io/api/badge/verified/c40e2a0f-8fc5-4ed9-8e0c-d366ff584739)](https://povv.io/verified/c40e2a0f-8fc5-4ed9-8e0c-d366ff584739)
 
-This repository is audited by [POVV](https://povv.io)'s adversarial AI swarm. The sealed
-verdict — including its full disclosed evidence base and machine-verified receipts — is
-public at the badge link, and its Ed25519 signature can be checked offline with this very
-package:
+Commit `494cd55` (1.1.3) holds POVV's first public **POVV Verified** certificate: every
+file read in full, no confirmed critical or high finding open. It took five Full Repo
+audits; the fixes are listed above (1.1.0–1.1.3). The fifth audit left five open questions
+(key trust wording, key type, notes in `errors`, offline default), answered in 1.1.4 by
+documentation and an Ed25519 key-type check. The certificate covers `494cd55` only.
+
+Audit receipts can be checked offline with this package:
 
 ```bash
 curl -H "Authorization: Bearer <token>" https://povv.io/api/ledger/receipt/<audit_run_id> > receipt.json
