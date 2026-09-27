@@ -48,11 +48,14 @@ async function main() {
 
   const mark = (v) => (v === true ? "PASS" : v === false ? "FAIL" : "n/a ");
   console.log("POVV receipt verification");
-  console.log(`  audit_run_id      : ${receipt.audit_run_id}`);
+  // Print the id from the signed payload, never the receipt's unsigned label.
+  const signedId = receipt.sealed_payload?.audit_run_id;
+  console.log(`  audit_run_id      : ${signedId ?? "(not in the signed payload)"}`);
   console.log(`  integrity_hash    : ${receipt.integrity_hash}`);
   console.log(`  hash recomputed   : ${mark(result.checks.hashValid)}`);
   console.log(`  ed25519 signature : ${mark(result.checks.signatureValid)}`);
   console.log(`  merkle inclusion  : ${mark(result.checks.inclusionValid)}`);
+  console.log(`  id bound to seal  : ${mark(result.checks.idBound)}`);
   if (result.errors.length > 0) {
     console.log("  notes:");
     for (const e of result.errors) console.log(`    - ${e}`);

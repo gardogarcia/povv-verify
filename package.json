@@ -1,6 +1,6 @@
 {
   "name": "povv-verify",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Offline, zero-trust verifier for POVV audit receipts: recomputes the integrity hash, checks the Ed25519 signature against the published JWKS, and verifies Merkle inclusion against the anchored checkpoint.",
   "license": "MIT",
   "type": "module",
