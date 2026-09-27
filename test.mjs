@@ -177,3 +177,10 @@ test("a forged receipt cannot print its own VERIFIED line", () => {
   assert.deepEqual(results, ["RESULT: NOT VERIFIED \u2717"]);
   assert.ok(!out.stdout.includes("\u001b"));
 });
+
+test("a key of the wrong type in the trusted set is refused", async () => {
+  const f = fakeFetch({ [DEFAULT_JWKS_URL]: [{ ...povv.jwk, kty: "RSA" }] });
+  const r = await verifyReceipt(receipt(payload, povv), { fetchKey: true, fetch: f.impl });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.includes("not an Ed25519 key")));
+});

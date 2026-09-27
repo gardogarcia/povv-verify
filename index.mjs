@@ -105,6 +105,7 @@ export async function fetchJwk(jwksUrl, keyId, fetchImpl = fetch) {
   const keys = Array.isArray(body.keys) ? body.keys : [];
   const match = keys.find((k) => k && k.kid === keyId);
   if (!match) throw new Error(`Key "${keyId}" is not in the trusted key set at ${jwksUrl}.`);
+  if (match.kty !== "OKP" || match.crv !== "Ed25519") throw new Error(`Key "${keyId}" is not an Ed25519 key.`);
   return match;
 }
 
