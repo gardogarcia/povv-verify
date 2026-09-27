@@ -54,7 +54,8 @@ async function main() {
   console.log(`  integrity_hash    : ${receipt.integrity_hash}`);
   console.log(`  hash recomputed   : ${mark(result.checks.hashValid)}`);
   console.log(`  ed25519 signature : ${mark(result.checks.signatureValid)}`);
-  console.log(`  merkle inclusion  : ${mark(result.checks.inclusionValid)}`);
+  console.log(`  merkle inclusion  : ${mark(result.checks.inclusionValid)}${result.checks.inclusionValid === null ? "" : " (against the receipt's own root)"}`);
+  console.log("  time anchor       : not checked (no external witness lookup)");
   console.log(`  id bound to seal  : ${mark(result.checks.idBound)}`);
   if (result.errors.length > 0) {
     console.log("  notes:");

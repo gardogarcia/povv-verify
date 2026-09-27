@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { canonicalize, computeIntegrityHash, verifyReceipt, DEFAULT_JWKS_URL } from "./index.mjs";
+import { canonicalize, computeIntegrityHash, verifyMerkleProof, verifyReceipt, DEFAULT_JWKS_URL } from "./index.mjs";
 
 function keypair(kid) {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -115,4 +115,26 @@ test("a receipt relabelled with another audit id is not verified", async () => {
   const ok = await verifyReceipt(rc, { fetchKey: true, fetch: f.impl });
   assert.equal(ok.ok, true, ok.errors.join("; "));
   assert.equal(ok.checks.idBound, true);
+});
+
+test("a malformed Merkle proof returns false instead of throwing", async () => {
+  const leaf = computeIntegrityHash(payload);
+  assert.equal(verifyMerkleProof(leaf, [null], leaf), false);
+  assert.equal(verifyMerkleProof(leaf, [{ position: "left" }], leaf), false);
+  assert.equal(verifyMerkleProof(leaf, "nope", leaf), false);
+  const f = fakeFetch({ [DEFAULT_JWKS_URL]: [povv.jwk] });
+  const rc = receipt(payload, povv);
+  rc.anchor = { merkle_root: rc.integrity_hash, proof: [null] };
+  const r = await verifyReceipt(rc, { fetchKey: true, fetch: f.impl });
+  assert.equal(r.checks.inclusionValid, false);
+  assert.equal(r.ok, false);
+});
+
+test("an anchor taken from the receipt is reported as unwitnessed, never as a time proof", async () => {
+  const f = fakeFetch({ [DEFAULT_JWKS_URL]: [povv.jwk] });
+  const rc = receipt(payload, povv);
+  rc.anchor = { merkle_root: rc.integrity_hash, proof: [] };
+  const r = await verifyReceipt(rc, { fetchKey: true, fetch: f.impl });
+  assert.equal(r.checks.inclusionValid, true, "an empty proof is self-consistent for a one-leaf root");
+  assert.ok(r.errors.some((e) => e.includes("NOT checked against an external witness")));
 });
