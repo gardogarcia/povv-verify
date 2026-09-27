@@ -43,10 +43,18 @@ function hashPair(a, b) {
   return createHash("sha256").update(Buffer.concat([a, b])).digest();
 }
 
-/** Verify a Merkle inclusion proof produced by buildMerkleProof on the server. */
+const HEX64 = /^[0-9a-f]{64}$/i;
+
+/**
+ * Verify a Merkle inclusion proof produced by buildMerkleProof on the server.
+ * A malformed proof returns false instead of throwing. This proves the leaf is under
+ * `rootHex` — not that the root was ever published; see verifyReceipt's anchor note.
+ */
 export function verifyMerkleProof(leafHex, proof, rootHex) {
+  if (!HEX64.test(String(leafHex)) || !HEX64.test(String(rootHex)) || !Array.isArray(proof)) return false;
   let acc = Buffer.from(leafHex, "hex");
   for (const node of proof) {
+    if (!node || !HEX64.test(String(node.hash)) || (node.position !== "left" && node.position !== "right")) return false;
     const sibling = Buffer.from(node.hash, "hex");
     acc = node.position === "left" ? hashPair(sibling, acc) : hashPair(acc, sibling);
   }
@@ -162,6 +170,9 @@ export async function verifyReceipt(receipt, options = {}) {
       receipt.anchor.merkle_root
     );
     if (!checks.inclusionValid) errors.push("Merkle inclusion proof did NOT reproduce the checkpoint root.");
+    // The root and proof come from the receipt itself. Nothing here fetches the external
+    // witness, so a matching proof shows self-consistency, not when the seal was made.
+    errors.push("Anchor root taken from the receipt; it was NOT checked against an external witness, so it does not prove when the seal was made.");
   }
 
   const ok =

@@ -2,8 +2,9 @@
 
 Offline, zero-trust verifier for **POVV audit receipts**.
 
-POVV seals every audit into an append-only, hash-linked, Ed25519-signed ledger and
-periodically anchors the Merkle root to an external witness. This tool lets anyone —
+POVV seals every audit into an append-only, hash-linked, Ed25519-signed ledger. The
+ledger is designed to anchor Merkle roots to an external witness; that anchoring is not
+active yet, and this tool does not check a witness (see below). This tool lets anyone —
 an enterprise client, an auditor, a regulator — independently verify a sealed audit
 **without trusting POVV's servers**. You only need the receipt JSON and POVV's
 published public key.
@@ -17,9 +18,11 @@ published public key.
 2. **Ed25519 signature** — verifies the signature over the integrity hash against
    POVV's published key (JWKS at `/.well-known/povv-ledger-keys`, or a local PEM).
    This proves POVV — and only the holder of the private key — produced the verdict.
-3. **Merkle inclusion** — if the seal has been anchored, verifies the inclusion proof
-   reproduces the checkpoint's Merkle root (which is committed to an external GitHub
-   witness, fixing the verdict in time).
+3. **Merkle inclusion** — if the receipt carries an anchor, verifies the inclusion proof
+   reproduces the Merkle root **written in that receipt**. The root is not compared with
+   any external witness, so this is a consistency check, not proof of when the seal was
+   made. `ok` rests on the hash and the signature; a receipt without an anchor can still
+   be `ok` (`checks.inclusionValid` is `null`).
 
 ## Install
 
@@ -100,6 +103,14 @@ POVV re-audited 1.1.0 (every file read) and confirmed one more defect, plus a co
   whose label disagrees with the signed id fails (`checks.idBound`).
 
 `test.mjs` reproduces both and requires them to fail.
+
+## Third self-audit clarifications (1.1.2)
+
+The third audit (every file read, 0 confirmed findings) raised four open questions about
+the Merkle anchor. Reading the code confirmed the substance: the anchor root and proof come
+from the receipt, and the old text claimed a GitHub witness fixed the verdict in time,
+which this tool never checked. The README and CLI now say exactly what is checked, and a
+malformed proof returns `false` instead of throwing.
 
 MIT licensed.
 
