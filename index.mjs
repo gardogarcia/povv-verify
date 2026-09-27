@@ -12,14 +12,18 @@
 
 import { createHash, createPublicKey, verify as edVerify } from "node:crypto";
 
-/** Deterministic JSON with recursively sorted object keys (arrays preserved). */
+/**
+ * Deterministic JSON with recursively sorted object keys (arrays preserved).
+ * Keys are defined, not assigned: `acc["__proto__"] = x` would hit the prototype
+ * setter and silently drop an own `__proto__` member from the hashed bytes.
+ */
 export function canonicalize(value) {
   return JSON.stringify(value, (_key, v) => {
     if (v && typeof v === "object" && !Array.isArray(v)) {
       return Object.keys(v)
         .sort()
         .reduce((acc, k) => {
-          acc[k] = v[k];
+          Object.defineProperty(acc, k, { value: v[k], enumerable: true, writable: true, configurable: true });
           return acc;
         }, {});
     }
@@ -92,11 +96,11 @@ export async function fetchJwk(jwksUrl, keyId, fetchImpl = fetch) {
  * key set: options.jwksUrl if you pin one, otherwise DEFAULT_JWKS_URL. The URL
  * embedded in the receipt is reported, never followed.
  *
- * Returns { ok, checks: { hashValid, signatureValid, inclusionValid|null }, errors }.
+ * Returns { ok, checks: { hashValid, signatureValid, inclusionValid|null, idBound|null }, errors }.
  */
 export async function verifyReceipt(receipt, options = {}) {
   const errors = [];
-  const checks = { hashValid: false, signatureValid: false, inclusionValid: null };
+  const checks = { hashValid: false, signatureValid: false, inclusionValid: null, idBound: null };
 
   if (!receipt || typeof receipt !== "object" || !receipt.sealed_payload) {
     return { ok: false, checks, errors: ["Receipt missing sealed_payload."] };
@@ -107,6 +111,16 @@ export async function verifyReceipt(receipt, options = {}) {
   checks.hashValid = recomputed === receipt.integrity_hash;
   if (!checks.hashValid) {
     errors.push(`integrity_hash mismatch: recomputed ${recomputed} != receipt ${receipt.integrity_hash}`);
+  }
+
+  // 1b) The top-level audit_run_id is an unsigned label; the signed one lives in
+  // sealed_payload. A receipt relabelled with another audit's id must not pass.
+  const signedId = receipt.sealed_payload.audit_run_id;
+  if (signedId !== undefined) {
+    checks.idBound = receipt.audit_run_id === undefined || receipt.audit_run_id === signedId;
+    if (!checks.idBound) {
+      errors.push(`audit_run_id mismatch: receipt says ${receipt.audit_run_id}, signed payload says ${signedId}`);
+    }
   }
 
   // 2) Signature.
@@ -153,6 +167,7 @@ export async function verifyReceipt(receipt, options = {}) {
   const ok =
     checks.hashValid &&
     checks.signatureValid &&
+    checks.idBound !== false &&
     (checks.inclusionValid === null || checks.inclusionValid === true);
 
   return { ok, checks, errors };

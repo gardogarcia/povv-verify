@@ -85,6 +85,22 @@ The hash is computed over JSON with **recursively sorted object keys** (arrays k
 their order). This exact function is shared by the POVV server signer and this
 verifier, so independently recomputed hashes always match byte-for-byte.
 
+## Second self-audit fixes (1.1.1)
+
+POVV re-audited 1.1.0 (every file read) and confirmed one more defect, plus a coverage gap:
+
+- **`__proto__` smuggling.** `canonicalize` rebuilt objects with `acc[k] = v[k]`. For an own
+  `__proto__` member (which `JSON.parse` creates) that assignment hits the prototype setter,
+  so the member vanished from the hashed bytes: extra, unsigned content could ride inside a
+  receipt that still printed `VERIFIED`. Keys are now defined as own properties, so any
+  added member changes the hash. Receipts without such a member hash exactly as before
+  (POVV checked its production data: no sealed payload contains one).
+- **Unsigned id label.** The CLI printed the receipt's top-level `audit_run_id`, which the
+  signature does not cover. It now prints the id from the signed payload, and a receipt
+  whose label disagrees with the signed id fails (`checks.idBound`).
+
+`test.mjs` reproduces both and requires them to fail.
+
 MIT licensed.
 
 ## Verified by POVV

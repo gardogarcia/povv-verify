@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { computeIntegrityHash, verifyReceipt, DEFAULT_JWKS_URL } from "./index.mjs";
+import { canonicalize, computeIntegrityHash, verifyReceipt, DEFAULT_JWKS_URL } from "./index.mjs";
 
 function keypair(kid) {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -80,4 +80,39 @@ test("a tampered payload fails the hash check", async () => {
   const r = await verifyReceipt(rc, { fetchKey: true, fetch: f.impl });
   assert.equal(r.checks.hashValid, false);
   assert.equal(r.ok, false);
+});
+
+test("an own __proto__ member is kept in the canonical bytes, in sorted order", () => {
+  const parsed = JSON.parse('{"b":1,"__proto__":{"x":1},"a":2}');
+  assert.equal(canonicalize(parsed), '{"__proto__":{"x":1},"a":2,"b":1}');
+});
+
+test("ordinary payloads canonicalize exactly as before (server compatibility)", () => {
+  assert.equal(canonicalize({ b: 1, a: { d: [{ z: 1, y: 2 }], c: null } }), '{"a":{"c":null,"d":[{"y":2,"z":1}]},"b":1}');
+});
+
+test("a __proto__ member smuggled into a genuine receipt breaks the hash", async () => {
+  const f = fakeFetch({ [DEFAULT_JWKS_URL]: [povv.jwk] });
+  const genuine = receipt(payload, povv);
+  const text = JSON.stringify(genuine).replace('"sealed_payload":{', '"sealed_payload":{"__proto__":{"vmi":100},');
+  const smuggled = JSON.parse(text);
+  assert.ok(Object.hasOwn(smuggled.sealed_payload, "__proto__"), "fixture must carry an own __proto__ member");
+  const r = await verifyReceipt(smuggled, { fetchKey: true, fetch: f.impl });
+  assert.equal(r.checks.hashValid, false);
+  assert.equal(r.ok, false);
+});
+
+test("a receipt relabelled with another audit id is not verified", async () => {
+  const f = fakeFetch({ [DEFAULT_JWKS_URL]: [povv.jwk] });
+  const rc = receipt({ ...payload, audit_run_id: "run-a" }, povv);
+  rc.audit_run_id = "run-b";
+  const r = await verifyReceipt(rc, { fetchKey: true, fetch: f.impl });
+  assert.equal(r.checks.hashValid, true);
+  assert.equal(r.checks.signatureValid, true);
+  assert.equal(r.checks.idBound, false);
+  assert.equal(r.ok, false);
+  rc.audit_run_id = "run-a";
+  const ok = await verifyReceipt(rc, { fetchKey: true, fetch: f.impl });
+  assert.equal(ok.ok, true, ok.errors.join("; "));
+  assert.equal(ok.checks.idBound, true);
 });
