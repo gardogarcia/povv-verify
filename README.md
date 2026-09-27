@@ -112,6 +112,23 @@ from the receipt, and the old text claimed a GitHub witness fixed the verdict in
 which this tool never checked. The README and CLI now say exactly what is checked, and a
 malformed proof returns `false` instead of throwing.
 
+## Fourth self-audit fixes (1.1.3)
+
+The fourth audit (every file read) confirmed one medium finding: the npm `description`
+still promised verification "against the anchored checkpoint". It now matches the code.
+Reading the open questions confirmed two more:
+
+- **Terminal spoofing.** Receipt-controlled text (for example a forged `jwks_url`) reached
+  the terminal unescaped, so ANSI escapes or newlines could print or overwrite a
+  `VERIFIED` line. Every receipt-derived string is now passed through `printable()`.
+- **`--pubkey` / `--jwks` without a value** silently fell back to fetching keys over the
+  network. It is now a usage error (exit `2`).
+
+Known limitation, not a defect today: the Merkle tree hashes leaves and interior nodes
+without domain tags. That only matters once an anchor is trusted as evidence; because this
+tool does not trust anchors (see 1.1.2), tags will be added on both sides before anchoring
+is switched on.
+
 MIT licensed.
 
 ## Verified by POVV

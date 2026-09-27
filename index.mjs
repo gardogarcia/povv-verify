@@ -31,6 +31,16 @@ export function canonicalize(value) {
   });
 }
 
+/**
+ * Render a receipt-controlled value for a terminal or log: control characters (C0, DEL,
+ * C1 — ANSI escapes live here), line/paragraph separators and bidi overrides become
+ * visible \uXXXX escapes, so a forged receipt cannot print or overwrite a "VERIFIED" line.
+ */
+export function printable(value) {
+  return String(value).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g,
+    (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
 export function sha256Hex(text) {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -118,7 +128,7 @@ export async function verifyReceipt(receipt, options = {}) {
   const recomputed = computeIntegrityHash(receipt.sealed_payload);
   checks.hashValid = recomputed === receipt.integrity_hash;
   if (!checks.hashValid) {
-    errors.push(`integrity_hash mismatch: recomputed ${recomputed} != receipt ${receipt.integrity_hash}`);
+    errors.push(`integrity_hash mismatch: recomputed ${recomputed} != receipt ${printable(receipt.integrity_hash)}`);
   }
 
   // 1b) The top-level audit_run_id is an unsigned label; the signed one lives in
@@ -127,7 +137,7 @@ export async function verifyReceipt(receipt, options = {}) {
   if (signedId !== undefined) {
     checks.idBound = receipt.audit_run_id === undefined || receipt.audit_run_id === signedId;
     if (!checks.idBound) {
-      errors.push(`audit_run_id mismatch: receipt says ${receipt.audit_run_id}, signed payload says ${signedId}`);
+      errors.push(`audit_run_id mismatch: receipt says ${printable(receipt.audit_run_id)}, signed payload says ${printable(signedId)}`);
     }
   }
 
@@ -139,13 +149,13 @@ export async function verifyReceipt(receipt, options = {}) {
     const trustedUrl = options.jwksUrl || DEFAULT_JWKS_URL;
     const claimedUrl = receipt.signature?.jwks_url;
     if (claimedUrl && claimedUrl !== trustedUrl) {
-      errors.push(`Ignored the receipt's own jwks_url (${claimedUrl}); checked against ${trustedUrl}.`);
+      errors.push(`Ignored the receipt's own jwks_url (${printable(claimedUrl)}); checked against ${printable(trustedUrl)}.`);
     }
     try {
       const jwk = await fetchJwk(trustedUrl, receipt.signature?.key_id, options.fetch || fetch);
       key = { jwk };
     } catch (e) {
-      errors.push(`JWKS error: ${e.message}`);
+      errors.push(`JWKS error: ${printable(e.message)}`);
     }
   }
 
@@ -156,7 +166,7 @@ export async function verifyReceipt(receipt, options = {}) {
       checks.signatureValid = verifySignature(receipt.integrity_hash, receipt.signature.value, key);
       if (!checks.signatureValid) errors.push("Ed25519 signature did NOT verify against the public key.");
     } catch (e) {
-      errors.push(`Signature verification error: ${e.message}`);
+      errors.push(`Signature verification error: ${printable(e.message)}`);
     }
   } else {
     errors.push("No public key available to verify signature (provide pem/jwk or set fetchKey:true).");

@@ -9,14 +9,21 @@
 // a receipt is never trusted. --no-fetch forbids network access (needs --pubkey).
 
 import { readFileSync } from "node:fs";
-import { verifyReceipt } from "./index.mjs";
+import { printable, verifyReceipt } from "./index.mjs";
 
 function parseArgs(argv) {
   const args = { _: [], fetch: true };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === "--jwks") args.jwks = argv[++i];
-    else if (a === "--pubkey") args.pubkey = argv[++i];
+    if (a === "--jwks" || a === "--pubkey") {
+      const v = argv[++i];
+      // A missing value must not silently fall back to fetching keys over the network.
+      if (!v || v.startsWith("--")) {
+        console.error(`${a} needs a value.`);
+        process.exit(2);
+      }
+      args[a.slice(2)] = v;
+    }
     else if (a === "--no-fetch") args.fetch = false;
     else args._.push(a);
   }
@@ -50,8 +57,8 @@ async function main() {
   console.log("POVV receipt verification");
   // Print the id from the signed payload, never the receipt's unsigned label.
   const signedId = receipt.sealed_payload?.audit_run_id;
-  console.log(`  audit_run_id      : ${signedId ?? "(not in the signed payload)"}`);
-  console.log(`  integrity_hash    : ${receipt.integrity_hash}`);
+  console.log(`  audit_run_id      : ${signedId === undefined ? "(not in the signed payload)" : printable(signedId)}`);
+  console.log(`  integrity_hash    : ${printable(receipt.integrity_hash)}`);
   console.log(`  hash recomputed   : ${mark(result.checks.hashValid)}`);
   console.log(`  ed25519 signature : ${mark(result.checks.signatureValid)}`);
   console.log(`  merkle inclusion  : ${mark(result.checks.inclusionValid)}${result.checks.inclusionValid === null ? "" : " (against the receipt's own root)"}`);
@@ -59,7 +66,7 @@ async function main() {
   console.log(`  id bound to seal  : ${mark(result.checks.idBound)}`);
   if (result.errors.length > 0) {
     console.log("  notes:");
-    for (const e of result.errors) console.log(`    - ${e}`);
+    for (const e of result.errors) console.log(`    - ${printable(e)}`);
   }
   console.log(`RESULT: ${result.ok ? "VERIFIED ✓" : "NOT VERIFIED ✗"}`);
   process.exit(result.ok ? 0 : 1);

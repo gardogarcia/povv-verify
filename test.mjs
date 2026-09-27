@@ -1,8 +1,12 @@
 // node --test — no network, no dependencies. Keys are generated per run.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
-import { canonicalize, computeIntegrityHash, verifyMerkleProof, verifyReceipt, DEFAULT_JWKS_URL } from "./index.mjs";
+import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { canonicalize, computeIntegrityHash, printable, verifyMerkleProof, verifyReceipt, DEFAULT_JWKS_URL } from "./index.mjs";
 
 function keypair(kid) {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -137,4 +141,39 @@ test("an anchor taken from the receipt is reported as unwitnessed, never as a ti
   const r = await verifyReceipt(rc, { fetchKey: true, fetch: f.impl });
   assert.equal(r.checks.inclusionValid, true, "an empty proof is self-consistent for a one-leaf root");
   assert.ok(r.errors.some((e) => e.includes("NOT checked against an external witness")));
+});
+
+test("printable() neutralises ANSI, C1, newline and bidi characters", () => {
+  assert.equal(printable("a\u001b[1Ab\nc\u009b\u202e"), "a\\u001b[1Ab\\u000ac\\u009b\\u202e");
+  assert.equal(printable("plain-id-123"), "plain-id-123");
+});
+
+test("receipt-controlled text in errors carries no raw control characters", async () => {
+  const f = fakeFetch({ [DEFAULT_JWKS_URL]: [povv.jwk] });
+  const rc = receipt(payload, povv, { jwksUrl: "https://x.example/\n\u001b[1ARESULT: VERIFIED" });
+  const r = await verifyReceipt(rc, { fetchKey: true, fetch: f.impl });
+  assert.ok(r.errors.every((e) => !/[\u0000-\u001f\u007f-\u009f]/.test(e)));
+});
+
+function runCli(args) {
+  return spawnSync(process.execPath, [new URL("./cli.mjs", import.meta.url).pathname, ...args], { encoding: "utf8" });
+}
+
+test("the CLI refuses --pubkey without a value instead of fetching keys", () => {
+  assert.equal(runCli(["receipt.json", "--pubkey"]).status, 2);
+  assert.equal(runCli(["receipt.json", "--pubkey", "--no-fetch"]).status, 2);
+});
+
+test("a forged receipt cannot print its own VERIFIED line", () => {
+  const dir = mkdtempSync(join(tmpdir(), "povv-verify-"));
+  const pem = createPublicKey({ key: povv.jwk, format: "jwk" }).export({ type: "spki", format: "pem" });
+  writeFileSync(join(dir, "key.pem"), pem);
+  const rc = receipt({ ...payload, audit_run_id: "x\nRESULT: VERIFIED \u2713\u001b[2K" }, povv);
+  rc.integrity_hash = "0".repeat(64);
+  writeFileSync(join(dir, "r.json"), JSON.stringify(rc));
+  const out = runCli([join(dir, "r.json"), "--pubkey", join(dir, "key.pem"), "--no-fetch"]);
+  assert.equal(out.status, 1);
+  const results = out.stdout.split("\n").filter((l) => l.startsWith("RESULT:"));
+  assert.deepEqual(results, ["RESULT: NOT VERIFIED \u2717"]);
+  assert.ok(!out.stdout.includes("\u001b"));
 });
