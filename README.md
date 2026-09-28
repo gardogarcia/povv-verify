@@ -53,6 +53,9 @@ povv-verify receipt.json --jwks https://povv.io/.well-known/povv-ledger-keys
 
 # Fully offline with a local public key, no network:
 povv-verify receipt.json --pubkey povv-public.pem --no-fetch
+
+# Offline with a pinned key set (key ids are checked), rejecting receipts older than a year:
+povv-verify receipt.json --jwks-file povv-keys.json --no-fetch --max-age 365
 ```
 
 Exit code `0` = VERIFIED, `1` = NOT VERIFIED, `2` = usage/IO error.
@@ -133,6 +136,22 @@ tool does not trust anchors (see 1.1.2), tags will be added on both sides before
 is switched on.
 
 MIT licensed.
+
+## Regression fixtures, CI and time checks (1.2.0)
+
+Suggested publicly by [@jeff_mitchog](https://www.threads.com/@jeff_mitchog) on Threads: keep every broken
+receipt as a fixture in CI, including a changed signing key, a `__proto__` receipt and a stale
+timestamp, and make the verifier fail before it prints VERIFIED. He was right on all three:
+
+- The tests only ran by hand. GitHub Actions now runs `npm test` on every push and pull
+  request (Node 18, 20, 22).
+- `fixtures/broken/` holds nine signed or forged receipts. Each goes through the real CLI and
+  must end in exactly one `RESULT: NOT VERIFIED` line (see `fixtures/README.md`).
+- The verifier ignored `sealed_at`. It now prints the signed time, rejects a time in the future
+  (1.1.4 printed VERIFIED for a receipt sealed "in 2099"), and `--max-age <days>` fails receipts
+  older than you accept. A signature proves who sealed a receipt, not that it is recent.
+- `--jwks-file <keys.json>` pins a key set you hold locally, with the same key id rules as the
+  published set and no network.
 
 ## Verified by POVV
 
