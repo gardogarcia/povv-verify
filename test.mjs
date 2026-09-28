@@ -3,10 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalize, computeIntegrityHash, printable, verifyMerkleProof, verifyReceipt, DEFAULT_JWKS_URL } from "./index.mjs";
+import { canonicalize, computeIntegrityHash, printable, verifyMerkleProof, verifyReceipt, DEFAULT_JWKS_URL, MAX_CLOCK_SKEW_MS } from "./index.mjs";
 
 function keypair(kid) {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -183,4 +183,48 @@ test("a key of the wrong type in the trusted set is refused", async () => {
   const r = await verifyReceipt(receipt(payload, povv), { fetchKey: true, fetch: f.impl });
   assert.equal(r.ok, false);
   assert.ok(r.errors.some((e) => e.includes("not an Ed25519 key")));
+});
+
+// Regression corpus (fixtures/, see fixtures/generate.mjs). Every broken receipt
+// goes through the real CLI and must end in exactly one NOT VERIFIED line.
+const FIX = new URL("./fixtures/", import.meta.url).pathname;
+const pinned = ["--jwks-file", join(FIX, "test-jwks.json"), "--no-fetch"];
+
+test("every broken fixture fails through the CLI before anything prints VERIFIED", () => {
+  const broken = readdirSync(join(FIX, "broken")).filter((f) => f.endsWith(".json"));
+  assert.ok(broken.length >= 9, "the corpus must not silently shrink");
+  for (const f of broken) {
+    const out = runCli([join(FIX, "broken", f), ...pinned]);
+    assert.equal(out.status, 1, `${f} must exit 1`);
+    assert.deepEqual(out.stdout.split("\n").filter((l) => l.startsWith("RESULT:")), ["RESULT: NOT VERIFIED \u2717"], f);
+    assert.ok(!out.stdout.includes("\u001b"), `${f}: no raw escape reaches the terminal`);
+    assert.ok(!out.stdout.includes("VERIFIED \u2713"), `${f}: no VERIFIED mark anywhere`);
+  }
+});
+
+test("the valid fixture verifies with the pinned key set and with the pinned PEM", () => {
+  assert.equal(runCli([join(FIX, "valid.json"), ...pinned]).status, 0);
+  assert.equal(runCli([join(FIX, "valid.json"), "--pubkey", join(FIX, "test-key.pem"), "--no-fetch"]).status, 0);
+});
+
+test("a stale receipt is still authentic, and fails only when --max-age asks for freshness", () => {
+  assert.equal(runCli([join(FIX, "stale.json"), ...pinned]).status, 0);
+  const strict = runCli([join(FIX, "stale.json"), ...pinned, "--max-age", "365"]);
+  assert.equal(strict.status, 1);
+  assert.ok(strict.stdout.includes("older than the 365-day limit"));
+  assert.equal(runCli([join(FIX, "valid.json"), ...pinned, "--max-age", "abc"]).status, 2);
+});
+
+test("sealed_at in the future fails; within the clock-skew allowance it passes", async () => {
+  const f = fakeFetch({ [DEFAULT_JWKS_URL]: [povv.jwk] });
+  const now = Date.parse("2026-09-28T12:00:00.000Z");
+  const at = (ms) => receipt({ ...payload, sealed_at: new Date(now + ms).toISOString() }, povv);
+  const ahead = await verifyReceipt(at(MAX_CLOCK_SKEW_MS + 1000), { fetchKey: true, fetch: f.impl, now });
+  assert.equal(ahead.checks.timeValid, false);
+  assert.equal(ahead.ok, false);
+  const skew = await verifyReceipt(at(MAX_CLOCK_SKEW_MS - 1000), { fetchKey: true, fetch: f.impl, now });
+  assert.equal(skew.checks.timeValid, true);
+  assert.equal(skew.ok, true, skew.errors.join("; "));
+  const garbage = await verifyReceipt(receipt({ ...payload, sealed_at: "yesterday" }, povv), { fetchKey: true, fetch: f.impl, now });
+  assert.equal(garbage.ok, false);
 });

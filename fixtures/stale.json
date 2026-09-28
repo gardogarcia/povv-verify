@@ -1,0 +1,16 @@
+{
+  "audit_run_id": "00000000-0000-4000-8000-000000000001",
+  "integrity_hash": "a8f9758d54b8108a15c851f36ed4085d3e8ff8b36dc916872241e6cc60b85bde",
+  "sealed_payload": {
+    "version": 2,
+    "audit_run_id": "00000000-0000-4000-8000-000000000001",
+    "sealed_at": "2025-01-15T00:00:00.000Z",
+    "technical_score": 74,
+    "note": "povv-verify regression fixture"
+  },
+  "signature": {
+    "algo": "Ed25519",
+    "value": "H42ymKaoXIy3Wk6bx6mK9NxkLKBky4WVmpi6y5+ab3iDlE3oSmY4yuuI9jvFkMgqZ4N54UwVSRUwTwolNASxCQ==",
+    "key_id": "fixture-key-1"
+  }
+}

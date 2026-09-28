@@ -15,7 +15,7 @@ function parseArgs(argv) {
   const args = { _: [], fetch: true };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === "--jwks" || a === "--pubkey") {
+    if (a === "--jwks" || a === "--pubkey" || a === "--jwks-file" || a === "--max-age") {
       const v = argv[++i];
       // A missing value must not silently fall back to fetching keys over the network.
       if (!v || v.startsWith("--")) {
@@ -23,6 +23,10 @@ function parseArgs(argv) {
         process.exit(2);
       }
       args[a.slice(2)] = v;
+      if (a === "--max-age" && !(Number(v) >= 0)) {
+        console.error("--max-age needs a number of days.");
+        process.exit(2);
+      }
     }
     else if (a === "--no-fetch") args.fetch = false;
     else args._.push(a);
@@ -34,7 +38,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const file = args._[0];
   if (!file) {
-    console.error("Usage: povv-verify <receipt.json> [--jwks <url>] [--pubkey <public.pem>] [--no-fetch]");
+    console.error("Usage: povv-verify <receipt.json> [--jwks <url> | --jwks-file <keys.json> | --pubkey <public.pem>] [--max-age <days>] [--no-fetch]");
     process.exit(2);
   }
 
@@ -46,8 +50,14 @@ async function main() {
     process.exit(2);
   }
 
-  const options = { fetchKey: args.fetch && !args.pubkey };
+  const options = { fetchKey: args.fetch && !args.pubkey && !args["jwks-file"] };
   if (args.pubkey) options.pem = readFileSync(args.pubkey, "utf8");
+  if (args["jwks-file"]) {
+    const body = JSON.parse(readFileSync(args["jwks-file"], "utf8"));
+    options.jwksKeys = Array.isArray(body.keys) ? body.keys : [];
+    options.jwksSource = args["jwks-file"];
+  }
+  if (args["max-age"] !== undefined) options.maxAgeDays = Number(args["max-age"]);
   // An explicitly pinned key set is trusted because YOU chose it, not the receipt.
   if (args.jwks) options.jwksUrl = args.jwks;
 
@@ -59,11 +69,14 @@ async function main() {
   const signedId = receipt.sealed_payload?.audit_run_id;
   console.log(`  audit_run_id      : ${signedId === undefined ? "(not in the signed payload)" : printable(signedId)}`);
   console.log(`  integrity_hash    : ${printable(receipt.integrity_hash)}`);
+  const sealedAt = receipt.sealed_payload?.sealed_at;
+  console.log(`  sealed at (signed): ${sealedAt === undefined ? "(not in the signed payload)" : printable(sealedAt)}`);
   console.log(`  hash recomputed   : ${mark(result.checks.hashValid)}`);
   console.log(`  ed25519 signature : ${mark(result.checks.signatureValid)}`);
   console.log(`  merkle inclusion  : ${mark(result.checks.inclusionValid)}${result.checks.inclusionValid === null ? "" : " (against the receipt's own root)"}`);
   console.log("  time anchor       : not checked (no external witness lookup)");
   console.log(`  id bound to seal  : ${mark(result.checks.idBound)}`);
+  console.log(`  time plausible    : ${mark(result.checks.timeValid)}${options.maxAgeDays === undefined ? "" : ` (max age ${options.maxAgeDays} days)`}`);
   if (result.errors.length > 0) {
     console.log("  notes:");
     for (const e of result.errors) console.log(`    - ${printable(e)}`);

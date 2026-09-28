@@ -102,12 +102,24 @@ export async function fetchJwk(jwksUrl, keyId, fetchImpl = fetch) {
   const res = await fetchImpl(jwksUrl);
   if (!res.ok) throw new Error(`JWKS fetch failed: HTTP ${res.status}`);
   const body = await res.json();
-  const keys = Array.isArray(body.keys) ? body.keys : [];
-  const match = keys.find((k) => k && k.kid === keyId);
-  if (!match) throw new Error(`Key "${keyId}" is not in the trusted key set at ${jwksUrl}.`);
+  return selectJwk(Array.isArray(body.keys) ? body.keys : [], keyId, jwksUrl);
+}
+
+/**
+ * Pick the key named `keyId` from a TRUSTED key set (fetched or pinned locally).
+ * Same fail-closed rules either way: no id, an id outside the set or a key that is
+ * not Ed25519 is an error, never a fallback to some other key.
+ */
+export function selectJwk(keys, keyId, source = "the trusted key set") {
+  if (!keyId) throw new Error("Receipt names no signing key id (signature.key_id).");
+  const match = (Array.isArray(keys) ? keys : []).find((k) => k && k.kid === keyId);
+  if (!match) throw new Error(`Key "${keyId}" is not in the trusted key set at ${source}.`);
   if (match.kty !== "OKP" || match.crv !== "Ed25519") throw new Error(`Key "${keyId}" is not an Ed25519 key.`);
   return match;
 }
+
+/** Signed timestamps more than this far ahead of the verifying clock are rejected. */
+export const MAX_CLOCK_SKEW_MS = 10 * 60 * 1000;
 
 /**
  * Verify a full receipt. Pass either { jwk } / { pem } directly, or set
@@ -115,11 +127,15 @@ export async function fetchJwk(jwksUrl, keyId, fetchImpl = fetch) {
  * key set: options.jwksUrl if you pin one, otherwise DEFAULT_JWKS_URL. The URL
  * embedded in the receipt is reported, never followed.
  *
- * Returns { ok, checks: { hashValid, signatureValid, inclusionValid|null, idBound|null }, errors }.
+ * options.jwksKeys pins a key set you hold locally (same kid rules, no network).
+ * options.now (ms) replaces the clock; options.maxAgeDays rejects receipts sealed
+ * longer ago than that. A sealed_at in the future is always rejected.
+ *
+ * Returns { ok, checks: { hashValid, signatureValid, inclusionValid|null, idBound|null, timeValid|null }, errors }.
  */
 export async function verifyReceipt(receipt, options = {}) {
   const errors = [];
-  const checks = { hashValid: false, signatureValid: false, inclusionValid: null, idBound: null };
+  const checks = { hashValid: false, signatureValid: false, inclusionValid: null, idBound: null, timeValid: null };
 
   if (!receipt || typeof receipt !== "object" || !receipt.sealed_payload) {
     return { ok: false, checks, errors: ["Receipt missing sealed_payload."] };
@@ -142,10 +158,38 @@ export async function verifyReceipt(receipt, options = {}) {
     }
   }
 
+  // 1c) Time, from the SIGNED payload. A signature proves who sealed a receipt, not
+  // that it is recent; an impossible (future) time fails, and a caller that wants
+  // freshness sets maxAgeDays.
+  const sealedAt = receipt.sealed_payload.sealed_at;
+  if (sealedAt !== undefined) {
+    const at = Date.parse(sealedAt);
+    const now = Number.isFinite(options.now) ? options.now : Date.now();
+    if (typeof sealedAt !== "string" || !Number.isFinite(at)) {
+      checks.timeValid = false;
+      errors.push(`sealed_at is not a valid timestamp: ${printable(sealedAt)}`);
+    } else if (at - now > MAX_CLOCK_SKEW_MS) {
+      checks.timeValid = false;
+      errors.push(`sealed_at ${printable(sealedAt)} is in the future.`);
+    } else if (Number.isFinite(options.maxAgeDays) && now - at > options.maxAgeDays * 86400000) {
+      checks.timeValid = false;
+      errors.push(`Receipt was sealed ${Math.floor((now - at) / 86400000)} days ago, older than the ${options.maxAgeDays}-day limit.`);
+    } else {
+      checks.timeValid = true;
+    }
+  }
+
   // 2) Signature.
   let key = null;
   if (options.pem) key = { pem: options.pem };
   else if (options.jwk) key = { jwk: options.jwk };
+  else if (Array.isArray(options.jwksKeys)) {
+    try {
+      key = { jwk: selectJwk(options.jwksKeys, receipt.signature?.key_id, options.jwksSource || "the pinned key set") };
+    } catch (e) {
+      errors.push(`JWKS error: ${printable(e.message)}`);
+    }
+  }
   else if (options.fetchKey) {
     const trustedUrl = options.jwksUrl || DEFAULT_JWKS_URL;
     const claimedUrl = receipt.signature?.jwks_url;
@@ -190,6 +234,7 @@ export async function verifyReceipt(receipt, options = {}) {
     checks.hashValid &&
     checks.signatureValid &&
     checks.idBound !== false &&
+    checks.timeValid !== false &&
     (checks.inclusionValid === null || checks.inclusionValid === true);
 
   return { ok, checks, errors };
